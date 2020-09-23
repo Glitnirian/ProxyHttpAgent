@@ -12,7 +12,7 @@ npm install proxy-http-agent --save
 
 The name start with proxy and make the accent on https agent to highlight that it's https.Agent
 
-## Creating the agent
+## Creating the agent
 ```ts
 let agent = getProxyHttpAgent(options);
 ```
