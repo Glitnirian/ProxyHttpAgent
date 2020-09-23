@@ -4,7 +4,7 @@ A factory to create http proxy agent! Based on the tunnel module! To use a proxy
 It support https => (http, https) and http => (http, https). (proxy => server) ! Either the proxy is http and either it will go as a tunnel for http! Or a tunnel for https through the CONNECT method!
 Or the proxy will be https! And direct forwarding will go!
 
-## Install
+## Install
 
 ```sh
 npm install proxy-http-agent --save
@@ -105,11 +105,12 @@ let agent: HttpsAgent = getProxyHttpAgent({
 
 We do expose and export it too.
 
-## Using with node-fetch and http.get
+## Usage with node-fetch and http.get
 
 From the test files here some nice examples
 
-### https end server
+### https end server
+
 (default is https)
 
 #### Fetch 
