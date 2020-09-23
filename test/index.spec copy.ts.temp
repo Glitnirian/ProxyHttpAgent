@@ -1,0 +1,283 @@
+import https, { Server as HttpsServer } from "https";
+import http, { Server as HttpServer } from "http";
+import { AddressInfo } from "net";
+import Proxy from 'proxy';
+import fs from 'fs';
+import { getProxyHttpAgent }  from '../src/index';
+import url from 'url';
+import fetch, { RequestInit } from 'node-fetch';
+import util from 'util';
+util.inspect.defaultOptions.depth = null; //enable full object reproting in console.log
+
+let localApiServer: HttpServer;
+let localApiServerPort: number;
+
+let localApiHttpsServer: HttpsServer;
+let localApiHttpsServerPort: number;
+
+let proxy: HttpsServer | HttpServer;
+let proxyPort: number;
+
+
+beforeAll((done) => {
+    // _____________ setup the local api http server
+
+    localApiServer = http.createServer();
+
+    localApiServer.listen(() => {
+        localApiServerPort = (localApiServer.address() as AddressInfo).port;
+        console.log('localApiServerPort')
+        console.log(localApiServerPort)
+        done();
+    });
+
+    // ____________ setup local api HTTPS server
+
+    const options = {
+        key: fs.readFileSync(`${__dirname}/server.key`),
+        cert: fs.readFileSync(`${__dirname}/server.cert`)
+    };
+    localApiHttpsServer = https.createServer(options);
+
+    localApiHttpsServer.listen(() => {
+        localApiHttpsServerPort = (localApiHttpsServer.address() as AddressInfo).port;
+        console.log('localApiHttpsServerPort')
+        console.log(localApiHttpsServerPort)
+        done();
+    });
+
+    // ____________ setup proxy
+    proxy = Proxy();
+        
+    proxy.listen(() => {
+        proxyPort = (proxy.address() as AddressInfo).port;
+        console.log('proxy port')
+        console.log(proxyPort)
+        done(); 
+    });
+
+    proxy.on('request', (data: any) => {
+        console.log('proxy req data :::::::::::/>')
+        console.log(data)
+    })
+});
+
+
+// ________________________ closing test local servers
+// shut down test HTTP server
+afterAll((done) => {
+    // _____________________ close test local http server
+    localApiServer.once('close', () => {
+        done();
+    });
+    localApiServer.close();
+
+    // ______________________ close test local https server
+    localApiHttpsServer.once('close', () => {
+        done();
+    });
+    localApiHttpsServer.close();
+
+
+    // _____________________ close proxy
+    proxy.once('close', () => {
+        done();
+    });
+    proxy.close();
+});
+
+// ______________ starting testing
+
+describe('Node fetch', () => {
+    // _______ http local test server
+
+    describe('http local test server', () => {
+        test('Test if it works with http (consuming a local server api)', (done) => {
+            console.log('test ::::>')
+            localApiServer.once('request', function(req, res) {
+                console.log('once hola !!!!!')
+                res.end(JSON.stringify(req.headers));
+            });
+
+            let proxyUrl =
+                process.env.HTTP_PROXY ||
+                process.env.http_proxy ||
+                `http://localhost:${proxyPort}`;
+            
+            let agent = getProxyHttpAgent(proxyUrl);
+            const opts: any = url.parse(`http://localhost:${localApiServerPort}`);
+    
+            // opts.agent = agent;
+    
+            let req = http.get(opts, function(res) {
+                let data: any = '';
+                res.setEncoding('utf8');
+                res.on('data', function(b) {
+                    data += b;
+                });
+                res.on('end', function() {
+                    data = JSON.parse(data);
+                    expect(`localhost:${localApiServerPort}`).toEqual(data.host);
+                    done();
+                });
+            });
+            req.once('error', done);
+        });
+        
+        test('Test if it works with node fetch (consuming a local server api)', async () => {
+            localApiServer.once('request', function(req, res) {
+                res.end(JSON.stringify(req.headers));
+            });
+    
+            let proxyUrl =
+                process.env.HTTP_PROXY ||
+                process.env.http_proxy ||
+                `http://localhost:${proxyPort}`;
+            
+            let agent = getProxyHttpAgent(proxyUrl);
+    
+            try {
+                const response = await fetch(`http://localhost:${localApiServerPort}`, {
+                    method: 'GET'
+                });
+                if (response.status === 200) {
+                    const data = await response.json();
+    
+                    if (data) {
+                        expect(data.host).toEqual(`localhost:${localApiServerPort}`);
+                    } else {
+                        fail(new Error('No data from local server!'));
+                    }
+                }
+            } catch(err) {
+                fail(err);
+            }
+        });
+    });
+
+    // ______ Https local test server
+
+    describe('Https local test server', () => {
+        test('Test if it works with http (consuming a local https server api)', (done) => {
+            localApiHttpsServer.once('request', function(req, res) {
+                res.end(JSON.stringify(req.headers));
+            });
+    
+            let proxyUrl =
+                process.env.HTTP_PROXY ||
+                process.env.http_proxy ||
+                `http://localhost:${proxyPort}`;
+            
+            let agent = getProxyHttpAgent(proxyUrl);
+            const opts: any = url.parse(`https://localhost:${localApiHttpsServerPort}`);
+            opts.rejectUnauthorized = false;
+            // opts.agent = agent;
+    
+            let req = https.get(opts, function(res) {
+                let data: any = '';
+                res.setEncoding('utf8');
+                res.on('data', function(b) {
+                    data += b;
+                });
+                res.on('end', function() {
+                    data = JSON.parse(data);
+                    expect(data.host).toEqual(`localhost:${localApiHttpsServerPort}`);
+                    done();
+                });
+            });
+            req.once('error', done);
+        });
+        
+        test('Test if it works with node fetch (consuming a local https server api)', async () => {
+            localApiHttpsServer.once('request', function(req, res) {
+                res.end(JSON.stringify(req.headers));
+            });
+    
+            let proxyUrl =
+                process.env.HTTP_PROXY ||
+                process.env.http_proxy ||
+                `http://localhost:${proxyPort}`;
+            
+            let agent = getProxyHttpAgent(proxyUrl);
+
+            try {
+                const response = await fetch(`https://localhost:${localApiHttpsServerPort}`, {
+                    method: 'GET',
+                    agent: new https.Agent({
+                        rejectUnauthorized: false
+                    })
+                });
+                
+                if (response.status === 200) {
+                    const data = await response.json();
+    
+                    if (data) {
+                        expect(data.host).toEqual(`localhost:${localApiHttpsServerPort}`);
+                    } else {
+                        fail(new Error('No data from local server!'));
+                    }
+                }
+            } catch(err) {
+                fail(err);
+            }
+        });    
+    });
+
+    describe('Binance api (https)', () => {
+        test('Test if it works with http.request (Binance api)', (done) => {    
+            let proxyUrl =
+                process.env.HTTP_PROXY ||
+                process.env.http_proxy ||
+                `http://localhost:${proxyPort}`;
+            
+            let agent = getProxyHttpAgent(proxyUrl);
+            const opts: any = url.parse(`https://api.binance.com/api/v3/ping`);
+            delete opts.port;
+            opts.agent = agent;
+    
+            let req = https.get(opts, function(res) {
+                let data: any = '';
+                res.setEncoding('utf8');
+                res.on('data', function(b) {
+                    data += b;
+                });
+                res.on('end', function() {
+                    data = JSON.parse(data);
+
+                    expect(data).toEqual({});
+                    done();
+                });
+            });
+            req.once('error', done);
+        });
+
+        test('Test if it works with node fetch (testing against binance api)', async () => {
+            let proxyUrl =
+            process.env.HTTP_PROXY ||
+            process.env.http_proxy ||
+            `http://localhost:${proxyPort}`;
+        
+            let agent = getProxyHttpAgent(proxyUrl);
+    
+            try {
+                const response = await fetch(`https://api.binance.com/api/v3/ping`, {
+                    method: 'GET',
+                    agent
+                });
+                if (response.status === 200) {
+                    const data = await response.json();
+                
+                    if (data) {
+                        expect(data).toEqual({});
+                    } else {
+                        fail(new Error('No data from binance server!'));
+                    }
+                }
+            } catch(err) {
+                fail(err);
+            }
+        });
+    });
+});
+
+// TODO: add test for an https proxy too
